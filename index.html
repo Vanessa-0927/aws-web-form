@@ -1,0 +1,146 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>官方意見回饋表單 (加密保護)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/elliptic/6.5.4/elliptic.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f4f7f6;
+            display: flex;
+            justify-content: center;
+            padding: 50px;
+        }
+
+        .form-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+            button:hover {
+                background: #0056b3;
+            }
+
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="form-container">
+        <h2>聯絡我們</h2>
+        <form id="contactForm">
+            <div class="form-group">
+                <label>姓名</label>
+                <input type="text" id="name" required>
+            </div>
+            <div class="form-group">
+                <label>聯絡電話</label>
+                <input type="tel" id="phone" required>
+            </div>
+            <div class="form-group">
+                <label>留言內容</label>
+                <textarea id="message" rows="4" required></textarea>
+            </div>
+            <button type="button" onclick="submitEncryptedForm()">加密並送出</button>
+        </form>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const ec = new elliptic.ec('secp256k1');
+        const publicKeyHex = '048aa56275c3d4fef2d144a64762c9bf2cd4d801060ecd2ebd693667402dcb3806c3ba670e075812d25ba305113c10fa1b43d852eaeab3aae6903eecb7df37c56b';
+        const apiUri = "https://241olnrjq1.execute-api.us-east-1.amazonaws.com/default/SubmitFormFunction";
+
+        async function submitEncryptedForm() {
+            const statusEl = document.getElementById('status');
+
+            // 1. 收集表單資料並轉成 JSON 字串
+            const formData = {
+                name: document.getElementById('name').value,
+                phone: document.getElementById('phone').value,
+                message: document.getElementById('message').value
+            };
+            const rawString = JSON.stringify(formData);
+
+            statusEl.style.color = "blue";
+            statusEl.innerText = "正在進行 ECC 加密...";
+
+            try {
+                // 2. ECC 混合加密邏輯
+                const pubKey = ec.keyFromPublic(publicKeyHex, 'hex');
+                const tempKeyPair = ec.genKeyPair();
+                const sharedSecret = tempKeyPair.derive(pubKey.getPublic()).toString(16);
+
+                // 使用 sharedSecret 作為 AES 密碼
+                const ciphertext = CryptoJS.AES.encrypt(rawString, sharedSecret).toString();
+
+                // 封裝成傳送格式
+                const finalPayload = JSON.stringify({
+                    ephemPubKey: tempKeyPair.getPublic('hex'),
+                    ciphertext: ciphertext
+                });
+
+                // 3. 送出到 AWS
+                const response = await fetch(apiUri, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ "encryptedString": finalPayload })
+                });
+
+                if (response.ok) {
+                    statusEl.style.color = "green";
+                    statusEl.innerText = "✅ 送出成功！資料已加密存入伺服器。";
+                    document.getElementById('contactForm').reset();
+                } else {
+                    throw new Error("伺服器回應錯誤");
+                }
+            } catch (error) {
+                statusEl.style.color = "red";
+                statusEl.innerText = "❌ 送出失敗，請檢查網址或網路。";
+                console.error(error);
+            }
+        }
+    </script>
+
+</body>
+</html>
